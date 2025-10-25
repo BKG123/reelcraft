@@ -1,7 +1,11 @@
+import json
 import os
-from utils.assets import search_and_download_asset, ASSET_FOLDER
-from utils.ai import generate_audio_file
 import random
+from turtle import title
+from utils.assets import search_and_download_asset, ASSET_FOLDER
+from utils.ai import generate_audio_file, gemini_llm_call
+from utils.fire_crawl import get_webpage_markdown
+from config.prompts import SCRIPT_GENERATOR_SYSTEM
 
 
 def create_srt(data):
@@ -103,3 +107,27 @@ async def generate_assets(script_json: dict, content: str):
     }
 
     return asset_details
+
+
+async def pipeline(url: str):
+    # step1: Get content from article
+    article_content = get_webpage_markdown(url)
+
+    # step 2: Generate script
+    user_prompt = f"""
+ARTICLE CONTENT:
+\"\"\"
+{article_content}
+\"\"\"
+"""
+    script = await gemini_llm_call(
+        system_prompt=SCRIPT_GENERATOR_SYSTEM,
+        user_prompt=user_prompt,
+        json_format=True,
+        model_name="gemini-2.5-flash",
+    )
+
+    if isinstance(script, str):
+        script = json.loads(script)
+
+    reel_title = script["title"]
