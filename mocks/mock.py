@@ -1,4 +1,4 @@
-MOCK_LLM_OUTPUT = """
+MOCK_LLM_RESPONSE = """
 {
   "title": "How ChatGPT Actually Works (The Simple Explanation)",
   "scenes": [

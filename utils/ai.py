@@ -1,4 +1,5 @@
 import os
+import asyncio
 from google import genai
 from google.genai import types
 from dotenv import load_dotenv
@@ -8,12 +9,17 @@ import mimetypes
 from langfuse import observe, get_client as get_langfuse_client
 from config.langfuse_config import langfuse_config
 from config.logger import get_logger
-from mocks.mock import MOCK_LLM_OUTPUT
+from mocks.mock import MOCK_LLM_RESPONSE
 
 load_dotenv()
 logger = get_logger(__name__)
 DIR = "assets/temp"
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+# Semaphore to limit concurrent audio generation requests
+# Gemini API free tier: 15 RPM, paid tier: higher limits
+# Setting to 3 concurrent requests to be conservative
+AUDIO_GENERATION_SEMAPHORE = asyncio.Semaphore(3)
 
 
 def get_file_mime_type(file_path: str) -> str:
@@ -46,27 +52,45 @@ def wave_file(filename, pcm, channels=1, rate=24000, sample_width=2):
 client = genai.Client(api_key=GEMINI_API_KEY)
 
 
-def generate_audio_file(content: str, file_name: str):
-    response = client.models.generate_content(
-        model="gemini-2.5-flash-preview-tts",
-        contents=content,
-        config=types.GenerateContentConfig(
-            response_modalities=["AUDIO"],
-            speech_config=types.SpeechConfig(
-                voice_config=types.VoiceConfig(
-                    prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                        voice_name="Kore",
+async def generate_audio_file(content: str, file_name: str):
+    """
+    Generate audio file from text using Gemini TTS API.
+    Uses semaphore to limit concurrent requests and avoid rate limits.
+
+    Args:
+        content: Text content to convert to speech
+        file_name: Name for the output audio file (without extension)
+
+    Returns:
+        Path to the generated audio file
+    """
+    async with AUDIO_GENERATION_SEMAPHORE:
+        # Sanitize filename: lowercase and remove spaces
+        sanitized_name = file_name.lower().replace(" ", "_")
+        logger.info(f"Generating audio for: {sanitized_name}")
+
+        response = await client.aio.models.generate_content(
+            model="gemini-2.5-flash-preview-tts",
+            contents=content,
+            config=types.GenerateContentConfig(
+                response_modalities=["AUDIO"],
+                speech_config=types.SpeechConfig(
+                    voice_config=types.VoiceConfig(
+                        prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                            voice_name="Kore",
+                        )
                     )
-                )
+                ),
             ),
-        ),
-    )
+        )
 
-    data = response.candidates[0].content.parts[0].inline_data.data
+        data = response.candidates[0].content.parts[0].inline_data.data
 
-    file_name = DIR + "audio" + f"{file_name}.wav"
-    wave_file(file_name, data)
-    return file_name
+        output_path = os.path.join(DIR, f"{sanitized_name}.wav")
+        wave_file(output_path, data)
+
+        logger.info(f"Audio generated: {output_path}")
+        return output_path
 
 
 logger = get_logger(__name__)
@@ -259,4 +283,4 @@ async def gemini_llm_call(
     #         except Exception:
     #             pass  # Silently fail if Langfuse update fails
     #     raise
-    MOCK_LLM_OUTPUT
+    return MOCK_LLM_RESPONSE
