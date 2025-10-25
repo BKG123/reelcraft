@@ -9,11 +9,11 @@ import mimetypes
 from langfuse import observe, get_client as get_langfuse_client
 from config.langfuse_config import langfuse_config
 from config.logger import get_logger
+from config.directories import AUDIO_DIR
 from mocks.mock import MOCK_LLM_RESPONSE
 
 load_dotenv()
 logger = get_logger(__name__)
-DIR = "assets/temp"
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 # Semaphore to limit concurrent audio generation requests
@@ -88,7 +88,7 @@ async def generate_audio_file(content: str, file_name: str):
 
             data = response.candidates[0].content.parts[0].inline_data.data
 
-        output_path = os.path.join(DIR, f"{sanitized_name}.wav")
+        output_path = os.path.join(AUDIO_DIR, f"{sanitized_name}.wav")
         wave_file(output_path, data)
 
         logger.info(f"Audio generated: {output_path}")
