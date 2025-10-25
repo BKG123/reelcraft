@@ -8,5 +8,7 @@ dependencies = [
     "firecrawl-py>=4.5.0",
     "google-genai>=1.46.0",
     "httpx>=0.28.1",
+    "langfuse>=3.8.1",
     "python-dotenv>=1.1.1",
+    "requests>=2.32.5",
 ]
