@@ -69,22 +69,24 @@ async def generate_audio_file(content: str, file_name: str):
         sanitized_name = file_name.lower().replace(" ", "_")
         logger.info(f"Generating audio for: {sanitized_name}")
 
-        response = await client.aio.models.generate_content(
-            model="gemini-2.5-flash-preview-tts",
-            contents=content,
-            config=types.GenerateContentConfig(
-                response_modalities=["AUDIO"],
-                speech_config=types.SpeechConfig(
-                    voice_config=types.VoiceConfig(
-                        prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                            voice_name="Kore",
+        # Use async context manager to ensure proper cleanup
+        async with client.aio as aclient:
+            response = await aclient.models.generate_content(
+                model="gemini-2.5-flash-preview-tts",
+                contents=content,
+                config=types.GenerateContentConfig(
+                    response_modalities=["AUDIO"],
+                    speech_config=types.SpeechConfig(
+                        voice_config=types.VoiceConfig(
+                            prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                                voice_name="Kore",
+                            )
                         )
-                    )
+                    ),
                 ),
-            ),
-        )
+            )
 
-        data = response.candidates[0].content.parts[0].inline_data.data
+            data = response.candidates[0].content.parts[0].inline_data.data
 
         output_path = os.path.join(DIR, f"{sanitized_name}.wav")
         wave_file(output_path, data)
