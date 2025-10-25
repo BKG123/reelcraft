@@ -8,6 +8,7 @@ import mimetypes
 from langfuse import observe, get_client as get_langfuse_client
 from config.langfuse_config import langfuse_config
 from config.logger import get_logger
+from mocks.mock import MOCK_LLM_OUTPUT
 
 load_dotenv()
 logger = get_logger(__name__)
@@ -156,105 +157,106 @@ async def gemini_llm_call(
     url_context: None = None,
     **kwargs,
 ):
-    try:
-        # Update Langfuse generation with metadata
-        if langfuse_config.is_configured:
-            try:
-                langfuse_client = get_langfuse_client()
-                langfuse_client.update_current_generation(
-                    name="gemini_llm_call",
-                    metadata={
-                        "model": model_name,
-                        "temperature": temperature,
-                        "json_format": json_format,
-                        "thinking_enabled": is_thinking_enabled,
-                        "has_images": bool(image_urls or image_file_path),
-                    },
-                )
-            except Exception as e:
-                logger.debug(f"Failed to update Langfuse context: {e}")
-        client = genai.Client(
-            api_key=os.getenv("GEMINI_API_KEY"),
-        )
+    # try:
+    #     # Update Langfuse generation with metadata
+    #     if langfuse_config.is_configured:
+    #         try:
+    #             langfuse_client = get_langfuse_client()
+    #             langfuse_client.update_current_generation(
+    #                 name="gemini_llm_call",
+    #                 metadata={
+    #                     "model": model_name,
+    #                     "temperature": temperature,
+    #                     "json_format": json_format,
+    #                     "thinking_enabled": is_thinking_enabled,
+    #                     "has_images": bool(image_urls or image_file_path),
+    #                 },
+    #             )
+    #         except Exception as e:
+    #             logger.debug(f"Failed to update Langfuse context: {e}")
+    #     client = genai.Client(
+    #         api_key=os.getenv("GEMINI_API_KEY"),
+    #     )
 
-        response_mime_type = "application/json" if json_format else "text/plain"
-        if is_thinking_enabled:
-            thinking_budget = kwargs.get("thinking_budget", 1024)
-        else:
-            thinking_budget = 0
+    #     response_mime_type = "application/json" if json_format else "text/plain"
+    #     if is_thinking_enabled:
+    #         thinking_budget = kwargs.get("thinking_budget", 1024)
+    #     else:
+    #         thinking_budget = 0
 
-        # Set up tools only when needed and not using JSON format
-        tools_config = None
-        if not json_format and url_context:
-            # For now, skip tools configuration as it requires specific setup
-            tools_config = None
+    #     # Set up tools only when needed and not using JSON format
+    #     tools_config = None
+    #     if not json_format and url_context:
+    #         # For now, skip tools configuration as it requires specific setup
+    #         tools_config = None
 
-        config = types.GenerateContentConfig(
-            response_mime_type=response_mime_type,
-            temperature=temperature,
-            top_p=0.95,
-            top_k=64,
-            system_instruction=system_prompt,
-            thinking_config=types.ThinkingConfig(thinking_budget=thinking_budget),
-            tools=tools_config,
-        )
+    #     config = types.GenerateContentConfig(
+    #         response_mime_type=response_mime_type,
+    #         temperature=temperature,
+    #         top_p=0.95,
+    #         top_k=64,
+    #         system_instruction=system_prompt,
+    #         thinking_config=types.ThinkingConfig(thinking_budget=thinking_budget),
+    #         tools=tools_config,
+    #     )
 
-        # Prepare contents with optional images
-        contents = _prepare_contents(user_prompt, image_urls, image_file_path)
+    #     # Prepare contents with optional images
+    #     contents = _prepare_contents(user_prompt, image_urls, image_file_path)
 
-        # Call the Gemini API with combined contents (images + prompt)
-        response = client.models.generate_content(
-            model=model_name,
-            contents=contents,
-            config=config,
-        )
-        # Build messages for logging
-        messages = [{"role": "system", "content": system_prompt}]
-        if user_prompt:
-            messages.append({"role": "user", "content": user_prompt})
-        if image_urls:
-            for url in image_urls:
-                messages.append({"role": "user", "content": f"[Attached {url}]"})
+    #     # Call the Gemini API with combined contents (images + prompt)
+    #     response = client.models.generate_content(
+    #         model=model_name,
+    #         contents=contents,
+    #         config=config,
+    #     )
+    #     # Build messages for logging
+    #     messages = [{"role": "system", "content": system_prompt}]
+    #     if user_prompt:
+    #         messages.append({"role": "user", "content": user_prompt})
+    #     if image_urls:
+    #         for url in image_urls:
+    #             messages.append({"role": "user", "content": f"[Attached {url}]"})
 
-        # Extract usage metadata from response
-        usage_metadata = None
-        if hasattr(response, "usage_metadata") and response.usage_metadata:
-            usage_metadata = {
-                "input": response.usage_metadata.prompt_token_count,
-                "output": response.usage_metadata.candidates_token_count,
-                "total": response.usage_metadata.total_token_count,
-            }
-            logger.info(f"Token usage: {usage_metadata}")
+    #     # Extract usage metadata from response
+    #     usage_metadata = None
+    #     if hasattr(response, "usage_metadata") and response.usage_metadata:
+    #         usage_metadata = {
+    #             "input": response.usage_metadata.prompt_token_count,
+    #             "output": response.usage_metadata.candidates_token_count,
+    #             "total": response.usage_metadata.total_token_count,
+    #         }
+    #         logger.info(f"Token usage: {usage_metadata}")
 
-        # Update Langfuse with input/output and usage
-        if langfuse_config.is_configured:
-            try:
-                langfuse_client = get_langfuse_client()
-                update_params = {
-                    "input": {"messages": messages, "config": config.__dict__},
-                    "output": response.text,
-                    "model": model_name,
-                }
-                if usage_metadata:
-                    update_params["usage_details"] = usage_metadata
+    #     # Update Langfuse with input/output and usage
+    #     if langfuse_config.is_configured:
+    #         try:
+    #             langfuse_client = get_langfuse_client()
+    #             update_params = {
+    #                 "input": {"messages": messages, "config": config.__dict__},
+    #                 "output": response.text,
+    #                 "model": model_name,
+    #             }
+    #             if usage_metadata:
+    #                 update_params["usage_details"] = usage_metadata
 
-                langfuse_client.update_current_generation(**update_params)
-            except Exception as e:
-                logger.debug(f"Failed to update Langfuse with I/O: {e}")
+    #             langfuse_client.update_current_generation(**update_params)
+    #         except Exception as e:
+    #             logger.debug(f"Failed to update Langfuse with I/O: {e}")
 
-        print(messages)
-        return response.text
+    #     print(messages)
+    #     return response.text
 
-    except Exception as e:
-        logger.error(f"Error in Gemini LLM call: {e}")
-        # Log error to Langfuse
-        if langfuse_config.is_configured:
-            try:
-                langfuse_client = get_langfuse_client()
-                langfuse_client.update_current_generation(
-                    level="ERROR",
-                    status_message=str(e),
-                )
-            except Exception:
-                pass  # Silently fail if Langfuse update fails
-        raise
+    # except Exception as e:
+    #     logger.error(f"Error in Gemini LLM call: {e}")
+    #     # Log error to Langfuse
+    #     if langfuse_config.is_configured:
+    #         try:
+    #             langfuse_client = get_langfuse_client()
+    #             langfuse_client.update_current_generation(
+    #                 level="ERROR",
+    #                 status_message=str(e),
+    #             )
+    #         except Exception:
+    #             pass  # Silently fail if Langfuse update fails
+    #     raise
+    MOCK_LLM_OUTPUT

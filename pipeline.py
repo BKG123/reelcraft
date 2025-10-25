@@ -131,3 +131,7 @@ ARTICLE CONTENT:
         script = json.loads(script)
 
     reel_title = script["title"]
+
+    script_chunks = {}
+
+    scenes = script["scenes"]
