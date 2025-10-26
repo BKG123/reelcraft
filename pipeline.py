@@ -49,14 +49,6 @@ ARTICLE CONTENT:
         audio = AudioSegment.from_wav(audio_file_path)
         scene["duration"] = len(audio) / 1000.0  # Convert milliseconds to seconds
 
-    audio_file_paths = sorted(
-        [
-            os.path.join("assets/temp/audio", f)
-            for f in os.listdir("assets/temp/audio")
-            if f.endswith(".wav")
-        ]
-    )
-
     script = await generate_assets(script)
     print(json.dumps(script, indent=2))
 
