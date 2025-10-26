@@ -91,7 +91,40 @@ Article URL -> Script Generation -> Audio Generation -> Asset Download -> Video 
 
 ## Usage
 
-### Basic Usage
+### Web Interface (Recommended)
+
+The easiest way to use ReelCraft is through the web interface:
+
+1. **Start the server**
+   ```bash
+   # Using uv
+   uv run python main.py
+
+   # Or with activated venv
+   python main.py
+   ```
+
+2. **Open your browser**
+
+   Navigate to [http://localhost:8000](http://localhost:8000)
+
+3. **Generate videos**
+   - Enter an article URL
+   - Click "Generate Video"
+   - Watch real-time progress updates
+   - Preview and download your video
+
+The web interface provides:
+- Real-time progress tracking via WebSocket
+- Video preview and download
+- Gallery of all generated videos
+- Modern, responsive design
+
+For detailed API documentation, visit [http://localhost:8000/docs](http://localhost:8000/docs) when the server is running, or see [API.md](API.md).
+
+### Programmatic Usage
+
+You can also use ReelCraft programmatically:
 
 ```python
 import asyncio
@@ -323,6 +356,8 @@ Core dependencies:
 - `firecrawl-py` - Article extraction
 - `httpx` - Async HTTP client
 - `requests` - Pexels API
+- `fastapi` - Web framework and API
+- `uvicorn` - ASGI server
 - `langfuse` - Monitoring (optional)
 - `python-dotenv` - Environment configuration
 
@@ -340,11 +375,11 @@ Core dependencies:
 
 ## Roadmap
 
+- [x] Web UI for easier usage (FastAPI + WebSocket)
 - [ ] Subtitle generation support
 - [ ] Custom font and styling options
 - [ ] Multiple aspect ratios (square, landscape)
 - [ ] Direct social media upload integration
-- [ ] Web UI for easier usage
 - [ ] Batch processing multiple articles
 - [ ] Custom background music library
 
