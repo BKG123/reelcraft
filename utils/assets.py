@@ -60,7 +60,9 @@ async def download_video(video_id, file_name, quality="hd"):
     # If requested quality not found, use first available video file
     if not video_link and video_data["video_files"]:
         video_link = video_data["video_files"][0]["link"]
-        print(f"Warning: {quality.upper()} quality not found, using first available video")
+        print(
+            f"Warning: {quality.upper()} quality not found, using first available video"
+        )
 
     if not video_link:
         raise ValueError(

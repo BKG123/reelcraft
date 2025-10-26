@@ -1,7 +1,6 @@
 import os
 from firecrawl import Firecrawl
 from dotenv import load_dotenv
-from mocks.mock import MOCK_FIRECRAWL_RESPONSE
 
 load_dotenv()
 
@@ -24,18 +23,17 @@ def get_webpage_markdown(
         ValueError: If no API key is provided
         Exception: If scraping fails
     """
-    # if not FIRECRAWL_API_KEY:
-    #     raise ValueError(
-    #         "API key must be provided or set in FIRECRAWL_API_KEY environment variable"
-    #     )
+    if not FIRECRAWL_API_KEY:
+        raise ValueError(
+            "API key must be provided or set in FIRECRAWL_API_KEY environment variable"
+        )
 
-    # firecrawl = Firecrawl(api_key=FIRECRAWL_API_KEY)
+    firecrawl = Firecrawl(api_key=FIRECRAWL_API_KEY)
 
-    # # Scrape the URL and get markdown content
-    # doc = firecrawl.scrape(url, formats=["markdown"])
+    # Scrape the URL and get markdown content
+    doc = firecrawl.scrape(url, formats=["markdown"])
 
-    # return doc.markdown
-    return MOCK_FIRECRAWL_RESPONSE
+    return doc.markdown
 
 
 # Example usage
