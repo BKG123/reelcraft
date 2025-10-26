@@ -2,18 +2,27 @@
 
 **Automatically transform articles into engaging short-form videos (Reels/TikToks) using AI.**
 
-ReelCraft is an automated video generation pipeline that converts web articles into 30-60 second social media videos. It uses Google's Gemini AI for script generation and text-to-speech, Pexels for stock media, and FFmpeg for video editing.
+ReelCraft is an automated video generation pipeline that converts web articles into 30-60 second social media videos. It uses Google's Gemini AI for script generation and text-to-speech, Pexels for stock media, and FFmpeg for video editing. Now with a modern web interface for easy video generation!
 
 ---
 
 ## Features
 
+### Core Features
 - **Automatic Script Generation**: Converts articles into engaging, fast-paced scripts optimized for short-form video
 - **AI-Powered Voice Over**: Generates natural-sounding voice narration using Gemini TTS
 - **Smart Asset Selection**: Automatically finds and downloads relevant images/videos from Pexels
 - **Professional Video Editing**: Combines visual assets, voice-over, and background music into polished videos
 - **Parallel Processing**: Efficiently generates audio and downloads assets concurrently
 - **Langfuse Integration**: Track and monitor AI model calls and performance
+
+### Web Interface Features
+- **🌐 Modern Web UI**: User-friendly interface for generating videos without code
+- **⚡ Real-time Progress**: WebSocket-powered live updates during video generation
+- **🎬 Video Gallery**: Browse, preview, and download all generated videos
+- **📱 Responsive Design**: Works seamlessly on desktop and mobile devices
+- **🔌 REST API**: Full-featured API with interactive documentation
+- **🎯 One-Click Generation**: Simple URL input to video output workflow
 
 ---
 
@@ -28,6 +37,46 @@ Article URL -> Script Generation -> Audio Generation -> Asset Download -> Video 
 3. **Audio Generation**: Parallel generation of voice-over for each scene
 4. **Asset Download**: Concurrent download of images/videos from Pexels based on keywords
 5. **Video Composition**: FFmpeg stitches assets together with audio, background music, and effects
+
+---
+
+## Web Interface
+
+ReelCraft now includes a modern, responsive web interface that makes video generation accessible to everyone!
+
+### Features
+
+- **🎨 Beautiful Dark Theme UI**: Modern, eye-friendly interface with smooth animations
+- **⚡ Real-time Updates**: Live progress tracking via WebSocket connection
+- **🎬 Video Gallery**: Browse all your generated videos with preview thumbnails
+- **📥 Easy Downloads**: One-click download for any generated video
+- **📱 Mobile Responsive**: Works perfectly on desktop, tablet, and mobile devices
+- **🔗 Simple Workflow**: Just paste a URL and click generate!
+
+### How to Use
+
+1. Start the server: `python main.py`
+2. Open http://localhost:8000 in your browser
+3. Enter an article URL
+4. Click "Generate Video"
+5. Watch real-time progress updates
+6. Preview and download your video!
+
+### API Documentation
+
+The FastAPI backend provides comprehensive API documentation:
+
+- **Interactive API Docs**: http://localhost:8000/docs (Swagger UI)
+- **Alternative Docs**: http://localhost:8000/redoc (ReDoc)
+- **Detailed Guide**: See [API.md](API.md) for complete reference
+
+### API Endpoints
+
+- `GET /health` - Health check
+- `POST /api/generate-video` - Generate video from URL
+- `GET /api/videos` - List all generated videos
+- `GET /api/videos/{name}` - Download/stream specific video
+- `WS /ws` - WebSocket for real-time progress
 
 ---
 
@@ -160,15 +209,41 @@ async def custom_pipeline():
 asyncio.run(custom_pipeline())
 ```
 
-### Running from Command Line
+### API Usage
+
+You can also interact with ReelCraft programmatically via the REST API:
+
+```python
+import requests
+
+# Generate a video via API
+response = requests.post(
+    "http://localhost:8000/api/generate-video",
+    json={"url": "https://example.com/article"}
+)
+
+result = response.json()
+print(f"Video created: {result['video_path']}")
+
+# List all videos
+videos = requests.get("http://localhost:8000/api/videos").json()
+for video in videos['videos']:
+    print(f"{video['filename']} - {video['size_mb']} MB")
+```
+
+Or using cURL:
 
 ```bash
-# Using uv
-uv run python -c "import asyncio; from pipeline import pipeline; asyncio.run(pipeline('YOUR_ARTICLE_URL'))"
+# Generate video
+curl -X POST "http://localhost:8000/api/generate-video" \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com/article"}'
 
-# Or with activated venv
-python -c "import asyncio; from pipeline import pipeline; asyncio.run(pipeline('YOUR_ARTICLE_URL'))"
+# List videos
+curl "http://localhost:8000/api/videos"
 ```
+
+For complete API documentation, visit [http://localhost:8000/docs](http://localhost:8000/docs) when the server is running, or see [API.md](API.md).
 
 ---
 
@@ -176,8 +251,13 @@ python -c "import asyncio; from pipeline import pipeline; asyncio.run(pipeline('
 
 ```
 reelcraft/
-├── pipeline.py              # Main video generation pipeline
-├── main.py                  # Entry point
+├── main.py                  # Server entry point (start here!)
+├── api.py                   # FastAPI application & REST endpoints
+├── pipeline.py              # Core video generation pipeline
+├── frontend/                # Web interface
+│   ├── index.html          # Main UI page
+│   ├── style.css           # Styling
+│   └── app.js              # Frontend logic & WebSocket client
 ├── config/
 │   ├── directories.py       # Asset folder paths
 │   ├── prompts.py          # AI prompt templates
@@ -189,8 +269,6 @@ reelcraft/
 │   ├── fire_crawl.py       # Article content extraction
 │   ├── video_editing.py    # FFmpeg video composition
 │   └── http_client.py      # HTTP utilities
-├── mocks/
-│   └── mock.py             # Sample data for testing
 └── assets/
     └── temp/
         ├── audio/          # Generated voice-overs
@@ -277,13 +355,16 @@ Each generated script contains:
 
 1. **Content Extraction** ([utils/fire_crawl.py](utils/fire_crawl.py))
    - Fetches article markdown using FireCrawl API
+   - WebSocket update: "Extracting article content..."
 
 2. **Script Generation** ([utils/ai.py](utils/ai.py) + [config/prompts.py](config/prompts.py))
    - Gemini AI generates 7-15 scenes with narration and asset keywords
+   - WebSocket update: "Generating script..."
 
 3. **Audio Generation** ([pipeline.py:38-50](pipeline.py#L38-L50))
    - Parallel TTS generation for all scenes (max 3 concurrent)
    - Calculates audio duration for each scene
+   - WebSocket update: Progress updates during generation
 
 4. **Asset Download** ([pipeline.py:70-112](pipeline.py#L70-L112))
    - Parallel download of images/videos from Pexels
