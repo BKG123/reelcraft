@@ -10,51 +10,6 @@ from utils.fire_crawl import get_webpage_markdown
 from config.prompts import SCRIPT_GENERATOR_SYSTEM
 
 
-async def generate_assets(script_json: dict, content: str):
-    # Assuming this data comes from open AI
-    asset_details = {}
-    data = script_json["data"]
-
-    for i, item in enumerate(data, 1):
-        asset_keywords = item["asset_keywords"]
-        asset_type = item["asset_type"]
-
-        print(f"Generating asset for item {i}...")
-        print(f"asset type: {asset_type}")
-
-        # Choose a random keyword from the list of asset keywords
-        chosen_keyword = random.choice(asset_keywords)
-
-        print(f"keyword: {chosen_keyword}")
-        # Search for the asset
-        asset = await search_and_download_asset(chosen_keyword, asset_type, file_name=i)
-
-        # Update the item with the asset
-        item["asset"] = asset
-        item["chosen_keyword"] = chosen_keyword
-        print()
-
-    asset_details["visual_assets"] = [
-        {
-            "path": f"{item['asset']}",
-            "type": item["asset_type"],
-            "duration": item["duration"],
-        }
-        for item in data
-    ]
-    voiceover_file_path = generate_audio_file(content, file_name="voiceover")
-
-    # TODO: not using this now
-    # background_score_file_path = ASSET_FOLDER + "background_score.mp3"
-
-    asset_details["audio_assets"] = {
-        "voice_over": {"path": voiceover_file_path},
-        # "background_score": {"path": background_score_file_path},
-    }
-
-    return asset_details
-
-
 async def pipeline(url: str):
     # step1: Get content from article
     article_content = get_webpage_markdown(url)
@@ -80,22 +35,22 @@ ARTICLE CONTENT:
 
     scenes = script["scenes"]
 
-    # # Generate all audio files in parallel with rate limiting
-    # audio_tasks = [
-    #     generate_audio_file(scene["script"], f"{reel_title}_{scene['scene_number']}")
-    #     for scene in scenes
-    # ]
+    # Generate all audio files in parallel with rate limiting
+    audio_tasks = [
+        generate_audio_file(scene["script"], f"{reel_title}_{scene['scene_number']}")
+        for scene in scenes
+    ]
 
-    # audio_file_paths = await asyncio.gather(*audio_tasks)
+    audio_file_paths = await asyncio.gather(*audio_tasks)
 
     # List already-made audio assets for dry run
-    audio_file_paths = sorted(
-        [
-            os.path.join("assets/temp/audio", f)
-            for f in os.listdir("assets/temp/audio")
-            if f.endswith(".wav")
-        ]
-    )
+    # audio_file_paths = sorted(
+    #     [
+    #         os.path.join("assets/temp/audio", f)
+    #         for f in os.listdir("assets/temp/audio")
+    #         if f.endswith(".wav")
+    #     ]
+    # )
 
     # Assign the generated audio file paths back to scenes
     for scene, audio_file_path in zip(scenes, audio_file_paths):
@@ -107,5 +62,54 @@ ARTICLE CONTENT:
     print(script)
 
 
+async def generate_assets(script: dict):
+    # Parse script if it's a string
+    if isinstance(script, str):
+        script = json.loads(script)
+
+    reel_title = script["title"]
+    scenes = script["scenes"]
+
+    # Generate all assets in parallel
+    asset_tasks = []
+    for scene in scenes:
+        asset_type = scene["asset_type"]
+        asset_keywords = scene["asset_keywords"]
+        scene_number = scene["scene_number"]
+
+        # Pick the first keyword for simplicity
+        keyword = asset_keywords[0] if asset_keywords else "generic"
+
+        # Sanitize filename: lowercase and remove spaces (same as audio pipeline)
+        file_name = f"{reel_title}_{scene_number}".lower().replace(" ", "_")
+
+        # Determine the actual asset type to download
+        # Handle cases like "image/video" by defaulting to video
+        actual_asset_type = "video" if "video" in asset_type else "image"
+
+        # Create async task for downloading asset
+        asset_tasks.append(
+            search_and_download_asset(
+                keyword=keyword,
+                asset_type=actual_asset_type,
+                file_name=file_name,
+                orientation="portrait"
+            )
+        )
+
+    # Execute all downloads in parallel
+    asset_file_paths = await asyncio.gather(*asset_tasks)
+
+    # Assign the generated asset file paths back to scenes
+    for scene, asset_file_path in zip(scenes, asset_file_paths):
+        scene["asset_file_path"] = asset_file_path
+
+    print(json.dumps(script, indent=2))
+    return script
+
+
 if __name__ == "__main__":
-    asyncio.run(pipeline("asd"))
+    # asyncio.run(pipeline("asd"))
+    from mocks.mock import MOCK_LLM_RESPONSE
+
+    asyncio.run(generate_assets(MOCK_LLM_RESPONSE))
