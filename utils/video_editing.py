@@ -1,6 +1,7 @@
 import ffmpeg
 import os
 from pydub import AudioSegment
+from config.directories import OUTPUT_FOLDER
 
 
 async def combine_audio_files(audio_file_paths: list, output_filename: str) -> str:
@@ -37,7 +38,9 @@ async def combine_audio_files(audio_file_paths: list, output_filename: str) -> s
     return output_path
 
 
-async def script_to_asset_details(script: dict, background_music_path: str = None) -> dict:
+async def script_to_asset_details(
+    script: dict, background_music_path: str = None
+) -> dict:
     """
     Transform script structure to video_editing_pipeline format.
 
@@ -62,9 +65,9 @@ async def script_to_asset_details(script: dict, background_music_path: str = Non
         # Determine actual type from file extension (more reliable than asset_type field)
         if asset_file_path:
             file_ext = os.path.splitext(asset_file_path)[1].lower()
-            if file_ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']:
+            if file_ext in [".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"]:
                 actual_type = "image"
-            elif file_ext in ['.mp4', '.mov', '.avi', '.webm', '.mkv', '.flv']:
+            elif file_ext in [".mp4", ".mov", ".avi", ".webm", ".mkv", ".flv"]:
                 actual_type = "video"
             else:
                 # Fallback to asset_type from script
@@ -76,11 +79,13 @@ async def script_to_asset_details(script: dict, background_music_path: str = Non
         else:
             actual_type = "video"  # default
 
-        visual_assets.append({
-            "path": asset_file_path,
-            "type": actual_type,
-            "duration": scene.get("duration", 5.0)
-        })
+        visual_assets.append(
+            {
+                "path": asset_file_path,
+                "type": actual_type,
+                "duration": scene.get("duration", 5.0),
+            }
+        )
 
         # Collect audio file paths
         if scene.get("audio_file_path"):
@@ -92,12 +97,8 @@ async def script_to_asset_details(script: dict, background_music_path: str = Non
     # Build asset_details structure
     asset_details = {
         "visual_assets": visual_assets,
-        "audio_assets": {
-            "voice_over": {
-                "path": combined_voiceover_path
-            }
-        },
-        "output_video": f"assets/outputs/{title.lower().replace(' ', '_')}.mp4"
+        "audio_assets": {"voice_over": {"path": combined_voiceover_path}},
+        "output_video": f"{OUTPUT_FOLDER}/{title.lower().replace(' ', '_')}.mp4",
     }
 
     # Add background music if provided
