@@ -1,5 +1,112 @@
 import ffmpeg
-from asset_generation import cleanup_assets
+import os
+from pydub import AudioSegment
+
+
+async def combine_audio_files(audio_file_paths: list, output_filename: str) -> str:
+    """
+    Combine multiple audio files into a single audio file sequentially.
+
+    Args:
+        audio_file_paths: List of paths to audio files
+        output_filename: Base name for the output file
+
+    Returns:
+        Path to the combined audio file
+    """
+    if not audio_file_paths:
+        raise ValueError("No audio files provided to combine")
+
+    # Create output directory if it doesn't exist
+    output_dir = "assets/temp/audio"
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Sanitize the output filename
+    safe_filename = output_filename.lower().replace(" ", "_")
+    output_path = os.path.join(output_dir, f"{safe_filename}_combined.wav")
+
+    # Load and concatenate all audio files
+    combined_audio = AudioSegment.empty()
+    for audio_path in audio_file_paths:
+        audio_segment = AudioSegment.from_wav(audio_path)
+        combined_audio += audio_segment
+
+    # Export the combined audio
+    combined_audio.export(output_path, format="wav")
+
+    return output_path
+
+
+async def script_to_asset_details(script: dict, background_music_path: str = None) -> dict:
+    """
+    Transform script structure to video_editing_pipeline format.
+
+    Args:
+        script: Script dictionary with scenes
+        background_music_path: Optional path to background music file
+
+    Returns:
+        Asset details dictionary ready for video_editing_pipeline
+    """
+    scenes = script.get("scenes", [])
+    title = script.get("title", "untitled")
+
+    # Extract visual assets and audio files from scenes
+    visual_assets = []
+    audio_file_paths = []
+
+    for scene in scenes:
+        # Add visual asset
+        asset_file_path = scene.get("asset_file_path")
+
+        # Determine actual type from file extension (more reliable than asset_type field)
+        if asset_file_path:
+            file_ext = os.path.splitext(asset_file_path)[1].lower()
+            if file_ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']:
+                actual_type = "image"
+            elif file_ext in ['.mp4', '.mov', '.avi', '.webm', '.mkv', '.flv']:
+                actual_type = "video"
+            else:
+                # Fallback to asset_type from script
+                asset_type = scene.get("asset_type", "video")
+                if "image" in asset_type:
+                    actual_type = "image"
+                else:
+                    actual_type = "video"  # default to video
+        else:
+            actual_type = "video"  # default
+
+        visual_assets.append({
+            "path": asset_file_path,
+            "type": actual_type,
+            "duration": scene.get("duration", 5.0)
+        })
+
+        # Collect audio file paths
+        if scene.get("audio_file_path"):
+            audio_file_paths.append(scene["audio_file_path"])
+
+    # Combine all scene audio files into one
+    combined_voiceover_path = await combine_audio_files(audio_file_paths, title)
+
+    # Build asset_details structure
+    asset_details = {
+        "visual_assets": visual_assets,
+        "audio_assets": {
+            "voice_over": {
+                "path": combined_voiceover_path
+            }
+        },
+        "output_video": f"assets/outputs/{title.lower().replace(' ', '_')}.mp4"
+    }
+
+    # Add background music if provided
+    if background_music_path and os.path.exists(background_music_path):
+        asset_details["audio_assets"]["background_score"] = {
+            "path": background_music_path
+        }
+
+    return asset_details
 
 
 async def stitch_assets(visual_assets: list):
@@ -26,17 +133,21 @@ async def stitch_assets(visual_assets: list):
                         "zoompan",
                         z="zoom+0.001",
                         s=f"{asset_width}x{asset_height}",
-                    )  # zoom+0.001 for slow zoom in
+                        d=duration * fps,  # duration in frames
+                    )
                     .filter("format", "yuv420p")
                     .trim(duration=duration)
+                    .setpts("PTS-STARTPTS")
                 )
             )
         elif asset_type == "video":
             ffmpeg_asset_objects.append(
                 ffmpeg.input(asset_path)
-                .filter("scale", asset_width, asset_height)
-                .trim(duration=duration)
+                .trim(start=0, duration=duration)
                 .setpts("PTS-STARTPTS")
+                .filter("scale", asset_width, asset_height)
+                .filter("fps", fps=fps)
+                .filter("format", "yuv420p")
             )
         elif asset_type == "scroll_image":
             # Assuming dynamic scroll speed is calculated elsewhere and passed in the asset details
@@ -153,8 +264,8 @@ async def video_editing_pipeline(asset_details: dict):
 
         # Run the FFmpeg command
         output_stream.run()
-        cleanup_assets(asset_details)
+        print(f"Video successfully created at: {output_video_path}")
 
     except Exception as e:
-        print(e)
-        cleanup_assets(asset_details)
+        print(f"Error during video editing: {e}")
+        raise
