@@ -1,6 +1,8 @@
 from pathlib import Path
 from typing import Optional
 import json
+import uuid
+from datetime import datetime
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -125,14 +127,26 @@ async def video_generation_job(job_id: str, progress_callback, url: str):
 
     # Calculate file size
     video_path = Path(result["output_video"])
+    if not video_path.is_absolute():
+        video_path = Path.cwd() / video_path
+
     size_mb = video_path.stat().st_size / (1024 * 1024) if video_path.exists() else None
+
+    # Save relative path to database (relative to project root)
+    try:
+        relative_path = video_path.relative_to(Path.cwd())
+        file_path_str = str(relative_path)
+    except ValueError:
+        # If relative_to fails, store absolute path
+        file_path_str = str(video_path)
+        logger.warning(f"Could not make path relative, storing absolute: {file_path_str}")
 
     # Save video to database
     async with async_session() as session:
         video = Video(
             title=result["title"],
             source_url=url,
-            file_path=str(video_path.relative_to(Path.cwd())),
+            file_path=file_path_str,
             size_mb=round(size_mb, 2) if size_mb else None,
             script_json=json.dumps(result["script"])
         )
@@ -157,15 +171,48 @@ async def generate_video(request: VideoGenerationRequest):
     """
     Start a background job to generate a video from an article URL.
 
-    Returns job_id for tracking progress.
+    If the URL has already been processed, returns the existing video
+    instead of creating a new job.
+
+    Returns job_id for tracking progress or existing video info.
 
     - **url**: The URL of the article to convert into a video
     """
     try:
         url = str(request.url)
-        logger.info(f"Creating video generation job for URL: {url}")
+        logger.info(f"Request for video generation from URL: {url}")
 
-        # Create background job
+        # Check if we already have a video for this URL
+        async with async_session() as session:
+            result = await session.execute(
+                select(Video).where(Video.source_url == url).order_by(Video.created_at.desc())
+            )
+            existing_video = result.scalar_one_or_none()
+
+            if existing_video:
+                logger.info(f"Found existing video (ID: {existing_video.id}) for URL: {url}")
+
+                # Create a "fake" completed job entry for consistency
+                job = Job(
+                    id=str(uuid.uuid4()),
+                    status=JobStatus.COMPLETED,
+                    progress=100,
+                    progress_message=f"Video already exists (reused from cache)",
+                    video_id=existing_video.id,
+                    started_at=datetime.utcnow(),
+                    completed_at=datetime.utcnow()
+                )
+                session.add(job)
+                await session.commit()
+
+                return {
+                    "job_id": job.id,
+                    "status": "completed",
+                    "message": f"Video already exists for this URL. Reusing existing video (ID: {existing_video.id})"
+                }
+
+        # URL not found, create new background job
+        logger.info(f"Creating new video generation job for URL: {url}")
         job_id = await job_manager.create_job(
             video_generation_job,
             url=url
@@ -278,22 +325,64 @@ async def list_videos(limit: int = 50, offset: int = 0):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/videos/{video_id}/file")
+async def get_video_by_id(video_id: int):
+    """
+    Download or stream a video by its database ID
+    """
+    try:
+        async with async_session() as session:
+            result = await session.execute(select(Video).where(Video.id == video_id))
+            video = result.scalar_one_or_none()
+
+            if not video or not video.file_path:
+                raise HTTPException(status_code=404, detail="Video not found")
+
+            # Convert relative path to absolute
+            video_path = Path(video.file_path)
+            if not video_path.is_absolute():
+                video_path = Path.cwd() / video_path
+
+            if not video_path.exists():
+                raise HTTPException(status_code=404, detail="Video file not found on disk")
+
+            return FileResponse(
+                video_path,
+                media_type="video/mp4",
+                filename=video_path.name
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error retrieving video: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/videos/{video_name}")
 async def get_video(video_name: str):
     """
-    Download or stream a generated video
+    Download or stream a generated video by filename (legacy endpoint)
     """
     try:
         output_folder = Path(OUTPUT_FOLDER)
         video_path = output_folder / video_name
+
+        # Security check: ensure the path is within OUTPUT_FOLDER
+        try:
+            video_path = video_path.resolve()
+            output_folder = output_folder.resolve()
+            video_path.relative_to(output_folder)
+        except ValueError:
+            raise HTTPException(status_code=403, detail="Access denied")
 
         if not video_path.exists():
             raise HTTPException(status_code=404, detail="Video not found")
 
         return FileResponse(video_path, media_type="video/mp4", filename=video_name)
 
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="Video not found")
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error retrieving video: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

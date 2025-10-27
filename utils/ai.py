@@ -17,8 +17,8 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 # Semaphore to limit concurrent audio generation requests
 # Gemini API free tier: 15 RPM, paid tier: higher limits
-# Setting to 3 concurrent requests to be conservative
-AUDIO_GENERATION_SEMAPHORE = asyncio.Semaphore(3)
+# Setting to 2 concurrent requests to avoid connection issues
+AUDIO_GENERATION_SEMAPHORE = asyncio.Semaphore(2)
 
 
 def get_file_mime_type(file_path: str) -> str:
@@ -50,48 +50,81 @@ def wave_file(filename, pcm, channels=1, rate=24000, sample_width=2):
 
 client = genai.Client(api_key=GEMINI_API_KEY)
 
+# Global async client for reuse across requests
+_async_client = None
+_async_client_lock = asyncio.Lock()
 
-async def generate_audio_file(content: str, file_name: str):
+
+async def get_async_client():
+    """Get or create the shared async client."""
+    global _async_client
+    async with _async_client_lock:
+        if _async_client is None:
+            _async_client = client.aio
+        return _async_client
+
+
+async def generate_audio_file(content: str, file_name: str, max_retries: int = 3):
     """
     Generate audio file from text using Gemini TTS API.
     Uses semaphore to limit concurrent requests and avoid rate limits.
+    Includes retry logic for connection errors.
 
     Args:
         content: Text content to convert to speech
         file_name: Name for the output audio file (without extension)
+        max_retries: Maximum number of retry attempts (default: 3)
 
     Returns:
         Path to the generated audio file
+
+    Raises:
+        Exception: If all retry attempts fail
     """
     async with AUDIO_GENERATION_SEMAPHORE:
         # Sanitize filename: lowercase and remove spaces
         sanitized_name = file_name.lower().replace(" ", "_")
         logger.info(f"Generating audio for: {sanitized_name}")
 
-        # Use async context manager to ensure proper cleanup
-        async with client.aio as aclient:
-            response = await aclient.models.generate_content(
-                model="gemini-2.5-flash-preview-tts",
-                contents=content,
-                config=types.GenerateContentConfig(
-                    response_modalities=["AUDIO"],
-                    speech_config=types.SpeechConfig(
-                        voice_config=types.VoiceConfig(
-                            prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                                voice_name="Kore",
+        aclient = await get_async_client()
+
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                response = await aclient.models.generate_content(
+                    model="gemini-2.5-flash-preview-tts",
+                    contents=content,
+                    config=types.GenerateContentConfig(
+                        response_modalities=["AUDIO"],
+                        speech_config=types.SpeechConfig(
+                            voice_config=types.VoiceConfig(
+                                prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                                    voice_name="Kore",
+                                )
                             )
-                        )
+                        ),
                     ),
-                ),
-            )
+                )
 
-            data = response.candidates[0].content.parts[0].inline_data.data
+                data = response.candidates[0].content.parts[0].inline_data.data
+                output_path = os.path.join(AUDIO_DIR, f"{sanitized_name}.wav")
+                wave_file(output_path, data)
 
-        output_path = os.path.join(AUDIO_DIR, f"{sanitized_name}.wav")
-        wave_file(output_path, data)
+                logger.info(f"Audio generated: {output_path}")
+                return output_path
 
-        logger.info(f"Audio generated: {output_path}")
-        return output_path
+            except Exception as e:
+                last_error = e
+                logger.warning(f"Audio generation attempt {attempt + 1}/{max_retries} failed for {sanitized_name}: {str(e)}")
+
+                if attempt < max_retries - 1:
+                    # Exponential backoff: 1s, 2s, 4s
+                    wait_time = 2 ** attempt
+                    logger.info(f"Retrying in {wait_time} seconds...")
+                    await asyncio.sleep(wait_time)
+                else:
+                    logger.error(f"All {max_retries} attempts failed for {sanitized_name}")
+                    raise Exception(f"Failed to generate audio after {max_retries} attempts: {str(last_error)}")
 
 
 logger = get_logger(__name__)
