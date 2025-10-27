@@ -19,6 +19,7 @@ const videoList = document.getElementById('video-list');
 
 // WebSocket connection
 let ws = null;
+let currentJobId = null;
 
 // Connect to WebSocket
 function connectWebSocket() {
@@ -26,15 +27,26 @@ function connectWebSocket() {
 
     ws.onopen = () => {
         console.log('WebSocket connected');
+
+        // Re-subscribe to job if there was one active
+        if (currentJobId) {
+            subscribeToJob(currentJobId);
+        }
     };
 
     ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
 
-        if (data.type === 'progress') {
-            updateProgress(data.message);
-        } else if (data.type === 'connection') {
+        if (data.type === 'connection') {
             console.log(data.message);
+        } else if (data.type === 'progress') {
+            updateProgress(data.message, 50);
+        } else if (data.type === 'job_progress') {
+            updateProgress(data.message, data.progress);
+        } else if (data.type === 'subscribed') {
+            console.log(data.message);
+        } else if (data.type === 'job_status') {
+            handleJobStatus(data.status);
         }
     };
 
@@ -48,17 +60,89 @@ function connectWebSocket() {
     };
 }
 
+// Subscribe to job updates
+function subscribeToJob(jobId) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ subscribe: jobId }));
+        currentJobId = jobId;
+    }
+}
+
 // Initialize WebSocket connection
 connectWebSocket();
 
 // Update progress display
-function updateProgress(message) {
+function updateProgress(message, progress = null) {
     progressText.textContent = message;
 
-    // Animate progress bar
-    const currentWidth = parseInt(progressFill.style.width) || 0;
-    const newWidth = Math.min(currentWidth + 15, 90);
-    progressFill.style.width = `${newWidth}%`;
+    if (progress !== null) {
+        progressFill.style.width = `${progress}%`;
+    } else {
+        // Animate progress bar incrementally
+        const currentWidth = parseInt(progressFill.style.width) || 0;
+        const newWidth = Math.min(currentWidth + 15, 90);
+        progressFill.style.width = `${newWidth}%`;
+    }
+}
+
+// Handle job status updates
+async function handleJobStatus(status) {
+    if (status.status === 'completed' && status.video_id) {
+        // Fetch video details
+        const video = await fetchVideoById(status.video_id);
+        if (video) {
+            showResult(video.file_path);
+            loadVideos();
+        }
+        currentJobId = null;
+    } else if (status.status === 'failed') {
+        showError(status.error_message || 'Video generation failed');
+        currentJobId = null;
+    } else if (status.status === 'cancelled') {
+        showError('Job was cancelled');
+        currentJobId = null;
+    }
+}
+
+// Fetch video by ID
+async function fetchVideoById(videoId) {
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/videos`);
+        const data = await response.json();
+        return data.videos.find(v => v.id === videoId);
+    } catch (error) {
+        console.error('Error fetching video:', error);
+        return null;
+    }
+}
+
+// Poll job status
+async function pollJobStatus(jobId) {
+    const maxAttempts = 180; // 3 minutes with 1 second interval
+    let attempts = 0;
+
+    const pollInterval = setInterval(async () => {
+        try {
+            const response = await fetch(`${API_BASE_URL}/api/jobs/${jobId}`);
+            const status = await response.json();
+
+            if (status.status === 'completed') {
+                clearInterval(pollInterval);
+                await handleJobStatus(status);
+            } else if (status.status === 'failed' || status.status === 'cancelled') {
+                clearInterval(pollInterval);
+                await handleJobStatus(status);
+            }
+
+            attempts++;
+            if (attempts >= maxAttempts) {
+                clearInterval(pollInterval);
+                showError('Job timed out. Please check job status manually.');
+            }
+        } catch (error) {
+            console.error('Error polling job status:', error);
+        }
+    }, 1000);
 }
 
 // Reset UI to initial state
@@ -69,6 +153,7 @@ function resetUI() {
     progressFill.style.width = '0%';
     articleUrlInput.value = '';
     generateBtn.disabled = false;
+    currentJobId = null;
 }
 
 // Show error
@@ -105,11 +190,11 @@ async function generateVideo() {
         errorContainer.classList.add('hidden');
         resultContainer.classList.add('hidden');
         progressContainer.classList.remove('hidden');
-        progressFill.style.width = '10%';
-        progressText.textContent = 'Starting video generation...';
+        progressFill.style.width = '5%';
+        progressText.textContent = 'Creating video generation job...';
         generateBtn.disabled = true;
 
-        // Make API request
+        // Make API request to create job
         const response = await fetch(`${API_BASE_URL}/api/generate-video`, {
             method: 'POST',
             headers: {
@@ -121,14 +206,17 @@ async function generateVideo() {
         const data = await response.json();
 
         if (!response.ok) {
-            throw new Error(data.detail || 'Failed to generate video');
+            throw new Error(data.detail || 'Failed to create video generation job');
         }
 
-        // Show result
-        showResult(data.video_path);
+        // Subscribe to job updates via WebSocket
+        const jobId = data.job_id;
+        subscribeToJob(jobId);
 
-        // Refresh video list
-        loadVideos();
+        // Also poll for updates as fallback
+        pollJobStatus(jobId);
+
+        progressText.textContent = 'Job created. Waiting for processing...';
 
     } catch (error) {
         console.error('Error:', error);
@@ -153,8 +241,8 @@ function formatFileSize(mb) {
 }
 
 // Format date
-function formatDate(timestamp) {
-    const date = new Date(timestamp * 1000);
+function formatDate(dateString) {
+    const date = new Date(dateString);
     return date.toLocaleDateString('en-US', {
         month: 'short',
         day: 'numeric',
@@ -176,15 +264,15 @@ async function loadVideos() {
 
         videoList.innerHTML = data.videos.map(video => `
             <div class="video-card">
-                <video src="${API_BASE_URL}/${video.path}" controls></video>
+                <video src="${API_BASE_URL}/${video.file_path}" controls></video>
                 <div class="video-card-info">
-                    <h4>${video.filename}</h4>
+                    <h4>${video.title}</h4>
                     <div class="video-card-meta">
                         <div>${formatDate(video.created_at)}</div>
-                        <div>${formatFileSize(video.size_mb)}</div>
+                        <div>${video.size_mb ? formatFileSize(video.size_mb) : 'N/A'}</div>
                     </div>
                     <div class="video-card-actions">
-                        <button class="btn btn-secondary" onclick="downloadVideo('${video.path}')">
+                        <button class="btn btn-secondary" onclick="downloadVideo('${video.file_path}')">
                             Download
                         </button>
                     </div>
