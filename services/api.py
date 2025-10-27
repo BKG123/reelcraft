@@ -7,10 +7,10 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, HttpUrl
 from sqlalchemy import select
-from pipeline import pipeline
+from services.pipeline import pipeline
 from config.directories import OUTPUT_FOLDER
-from database import init_db, get_session, async_session, Job, Video, JobStatus
-from job_manager import job_manager, JobProgress
+from services.database import init_db, get_session, async_session, Job, Video, JobStatus
+from services.job_manager import job_manager, JobProgress
 import logging
 
 # Configure logging

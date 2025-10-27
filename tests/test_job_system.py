@@ -1,8 +1,8 @@
 """Test script for the job-based video generation system."""
 
 import asyncio
-from database import init_db, async_session, Job, Video
-from job_manager import job_manager
+from services.database import init_db, async_session, Job, Video
+from services.job_manager import job_manager
 from sqlalchemy import select
 
 

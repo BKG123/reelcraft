@@ -8,7 +8,7 @@ from dataclasses import dataclass
 import logging
 
 from sqlalchemy import select
-from database import async_session, Job, JobStatus, Video
+from services.database import async_session, Job, JobStatus, Video
 
 logger = logging.getLogger(__name__)
 
