@@ -6,13 +6,15 @@ from datetime import datetime
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel, HttpUrl
 from sqlalchemy import select
 from services.pipeline import pipeline
 from config.directories import OUTPUT_FOLDER
 from services.database import init_db, get_session, async_session, Job, Video, JobStatus
 from services.job_manager import job_manager, JobProgress
+from services.cleanup import cleanup_generation_assets
+from services.storage import storage_manager
 import logging
 
 # Configure logging
@@ -154,6 +156,21 @@ async def video_generation_job(job_id: str, progress_callback, url: str):
         await session.commit()
         await session.refresh(video)
 
+        # Upload to cloud storage if enabled
+        try:
+            if storage_manager.is_enabled():
+                await broadcast_progress("Uploading video to cloud storage...")
+                cloud_url = await storage_manager.upload_video(str(video_path), video.id)
+                if cloud_url:
+                    logger.info(f"Video uploaded to cloud: {cloud_url}")
+                    # Update file_path to cloud URL
+                    video.file_path = cloud_url
+                    await session.commit()
+                    await session.refresh(video)
+        except Exception as e:
+            logger.error(f"Error uploading to cloud storage: {e}")
+            # Continue with local storage if cloud upload fails
+
         # Update job with video_id
         result_db = await session.execute(select(Job).where(Job.id == job_id))
         job = result_db.scalar_one_or_none()
@@ -162,6 +179,16 @@ async def video_generation_job(job_id: str, progress_callback, url: str):
             await session.commit()
 
         await broadcast_progress(f"Video generation completed! Video ID: {video.id}")
+
+    # Clean up temporary assets after successful generation
+    try:
+        await broadcast_progress("Cleaning up temporary files...")
+        cleaned_count, cleaned_size = cleanup_generation_assets(result["title"])
+        cleaned_mb = cleaned_size / (1024 * 1024)
+        logger.info(f"Cleaned up {cleaned_count} files ({cleaned_mb:.2f} MB)")
+    except Exception as e:
+        logger.error(f"Error during cleanup: {e}")
+        # Don't fail the job if cleanup fails
 
     return result
 
@@ -328,7 +355,10 @@ async def list_videos(limit: int = 50, offset: int = 0):
 @app.get("/api/videos/{video_id}/file")
 async def get_video_by_id(video_id: int):
     """
-    Download or stream a video by its database ID
+    Download or stream a video by its database ID.
+
+    If the video is stored in cloud storage (URL starts with http/https),
+    redirects to the cloud URL. Otherwise serves the local file.
     """
     try:
         async with async_session() as session:
@@ -338,7 +368,12 @@ async def get_video_by_id(video_id: int):
             if not video or not video.file_path:
                 raise HTTPException(status_code=404, detail="Video not found")
 
-            # Convert relative path to absolute
+            # Check if file_path is a cloud URL (starts with http:// or https://)
+            if video.file_path.startswith(('http://', 'https://')):
+                # Redirect to cloud storage URL
+                return RedirectResponse(url=video.file_path)
+
+            # Local file - convert relative path to absolute
             video_path = Path(video.file_path)
             if not video_path.is_absolute():
                 video_path = Path.cwd() / video_path
