@@ -39,9 +39,10 @@ Article URL -> Script Generation -> Audio Generation -> Asset Download -> Video 
 
 1. **Content Extraction**: Fetches article content using FireCrawl
 2. **Script Generation**: Gemini AI converts the article into 7-15 scene scripts with visual keywords
-3. **Audio Generation**: Parallel generation of voice-over for each scene
-4. **Asset Download**: Concurrent download of images/videos from Pexels based on keywords
-5. **Video Composition**: FFmpeg stitches assets together with audio, background music, and effects
+3. **Audio Generation**: Parallel generation of voice-over for each scene, with duration measurement
+4. **Audio-Driven Pacing**: Each scene's duration is set by its voiceover length (ensures natural speech)
+5. **Asset Download**: Concurrent download of images/videos from Pexels based on keywords
+6. **Video Composition**: FFmpeg stitches visual assets to match audio timing, adds background music and effects
 
 ---
 
@@ -446,19 +447,20 @@ Each generated script contains:
    - Gemini AI generates 7-15 scenes with narration and asset keywords
    - WebSocket update: "Generating script..."
 
-3. **Audio Generation** ([pipeline.py:38-50](pipeline.py#L38-L50))
+3. **Audio Generation** ([services/pipeline.py:56-71](services/pipeline.py#L56-L71))
    - Parallel TTS generation for all scenes (max 3 concurrent)
-   - Calculates audio duration for each scene
+   - **Audio-driven pacing**: Measures duration of each generated audio file
+   - Sets scene duration based on voiceover length (ensures natural speech)
    - WebSocket update: Progress updates during generation
 
-4. **Asset Download** ([pipeline.py:70-112](pipeline.py#L70-L112))
+4. **Asset Download** ([services/pipeline.py:74-76](services/pipeline.py#L74-L76))
    - Parallel download of images/videos from Pexels
    - Handles "image/video" asset types intelligently
 
 5. **Video Composition** ([utils/video_editing.py](utils/video_editing.py))
    - Combines all audio files sequentially
-   - Stitches visual assets with effects (zoom/pan for images)
-   - Adjusts audio tempo to match video duration
+   - Stitches visual assets to match audio duration (images displayed for full voiceover length, videos trimmed/looped)
+   - Applies Ken Burns effect (zoom/pan) for still images
    - Mixes voice-over with background music
    - Exports final video
 
@@ -506,10 +508,11 @@ AUDIO_GENERATION_SEMAPHORE = asyncio.Semaphore(2)  # Reduce concurrent requests
 
 ### Audio/Video Sync Issues
 
-The pipeline automatically adjusts audio tempo (0.5x - 2x) to match video duration. If issues persist:
-- Check scene duration calculations
-- Verify FFmpeg installation
-- Review audio file integrity
+The pipeline uses **audio-driven duration** - each scene's visual duration is set by the voiceover length, ensuring natural-sounding narration. If sync issues occur:
+- Check that audio files are being generated correctly
+- Verify scene duration calculations in [services/pipeline.py:69-71](services/pipeline.py#L69-L71)
+- Ensure FFmpeg is properly installed and accessible
+- Review audio file integrity with `ffprobe`
 
 ---
 
