@@ -122,6 +122,7 @@ async def generate_assets(script: dict, progress_callback: Optional[Callable] = 
         asset_type = scene["asset_type"]
         asset_keywords = scene["asset_keywords"]
         scene_number = scene["scene_number"]
+        script_text = scene.get("script", "")
 
         # Pick the first keyword for simplicity
         keyword = asset_keywords[0] if asset_keywords else "generic"
@@ -133,12 +134,14 @@ async def generate_assets(script: dict, progress_callback: Optional[Callable] = 
         # Handle cases like "image/video" by defaulting to video
         actual_asset_type = "video" if "video" in asset_type else "image"
 
-        # Create async task for downloading asset
+        # Create async task for downloading asset with AI filtering
         asset_tasks.append(
             search_and_download_asset(
                 keyword=keyword,
                 asset_type=actual_asset_type,
                 file_name=file_name,
+                script_text=script_text,  # Pass script for AI filtering
+                use_ai_filtering=True,    # Enable AI filtering
                 orientation="portrait",
             )
         )
