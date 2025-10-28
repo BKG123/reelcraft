@@ -14,12 +14,17 @@ ReelCraft is an automated video generation pipeline that converts web articles i
 - **Smart Asset Selection**: Automatically finds and downloads relevant images/videos from Pexels
 - **Professional Video Editing**: Combines visual assets, voice-over, and background music into polished videos
 - **Parallel Processing**: Efficiently generates audio and downloads assets concurrently
+- **Database Integration**: SQLite database for tracking videos, jobs, and metadata
+- **Cloud Storage Support**: Optional Cloudflare R2 integration for scalable video storage
+- **Job Management**: Background job tracking with status updates and cancellation
 - **Langfuse Integration**: Track and monitor AI model calls and performance
 
 ### Web Interface Features
 - **🌐 Modern Web UI**: User-friendly interface for generating videos without code
 - **⚡ Real-time Progress**: WebSocket-powered live updates during video generation
 - **🎬 Video Gallery**: Browse, preview, and download all generated videos
+- **🗑️ Video Management**: Delete videos from both local and cloud storage
+- **📊 Job Tracking**: Monitor and cancel background video generation jobs
 - **📱 Responsive Design**: Works seamlessly on desktop and mobile devices
 - **🔌 REST API**: Full-featured API with interactive documentation
 - **🎯 One-Click Generation**: Simple URL input to video output workflow
@@ -72,11 +77,22 @@ The FastAPI backend provides comprehensive API documentation:
 
 ### API Endpoints
 
+**Health & Status**
 - `GET /health` - Health check
-- `POST /api/generate-video` - Generate video from URL
-- `GET /api/videos` - List all generated videos
-- `GET /api/videos/{name}` - Download/stream specific video
-- `WS /ws` - WebSocket for real-time progress
+
+**Video Generation**
+- `POST /api/generate-video` - Generate video from URL (creates background job)
+- `WS /ws` - WebSocket for real-time progress updates
+
+**Video Management**
+- `GET /api/videos` - List all generated videos with metadata
+- `GET /api/videos/{video_id}/file` - Stream/download video file by ID
+- `DELETE /api/videos/{video_id}` - Delete video (local and/or cloud storage)
+
+**Job Management**
+- `GET /api/jobs` - List all background jobs
+- `GET /api/jobs/{job_id}` - Get specific job status
+- `POST /api/jobs/{job_id}/cancel` - Cancel running job
 
 ---
 
@@ -118,12 +134,20 @@ The FastAPI backend provides comprehensive API documentation:
 
    Create a `.env` file in the project root:
    ```bash
-   # Required
+   # Required API Keys
    GEMINI_API_KEY=your_gemini_api_key_here
    PEXELS_API_KEY=your_pexels_api_key_here
    FIRECRAWL_API_KEY=your_firecrawl_api_key_here
 
-   # Optional - for monitoring
+   # Optional - Cloud Storage (Cloudflare R2)
+   R2_ENABLED=false
+   R2_ENDPOINT_URL=https://your-account-id.r2.cloudflarestorage.com
+   R2_ACCESS_KEY_ID=your_r2_access_key
+   R2_SECRET_ACCESS_KEY=your_r2_secret_key
+   R2_BUCKET_NAME=reelcraft-videos
+   R2_PUBLIC_URL=https://videos.yourdomain.com
+
+   # Optional - Monitoring
    LANGFUSE_PUBLIC_KEY=your_langfuse_public_key
    LANGFUSE_SECRET_KEY=your_langfuse_secret_key
    LANGFUSE_HOST=https://cloud.langfuse.com
@@ -131,10 +155,14 @@ The FastAPI backend provides comprehensive API documentation:
 
 ### API Keys
 
+**Required:**
 - **Gemini API**: Get your key at [Google AI Studio](https://makersuite.google.com/app/apikey)
 - **Pexels API**: Get your key at [Pexels API](https://www.pexels.com/api/)
 - **FireCrawl API**: Get your key at [FireCrawl](https://firecrawl.dev/)
-- **Langfuse** (Optional): Get your keys at [Langfuse](https://langfuse.com/)
+
+**Optional:**
+- **Cloudflare R2**: Set up at [Cloudflare Dashboard](https://dash.cloudflare.com/) → R2 → Create bucket
+- **Langfuse**: Get your keys at [Langfuse](https://langfuse.com/)
 
 ---
 
@@ -252,12 +280,16 @@ For complete API documentation, visit [http://localhost:8000/docs](http://localh
 ```
 reelcraft/
 ├── main.py                  # Server entry point (start here!)
-├── api.py                   # FastAPI application & REST endpoints
 ├── pipeline.py              # Core video generation pipeline
+├── reelcraft.db            # SQLite database (auto-created)
 ├── frontend/                # Web interface
 │   ├── index.html          # Main UI page
 │   ├── style.css           # Styling
 │   └── app.js              # Frontend logic & WebSocket client
+├── services/                # Backend services
+│   ├── api.py              # FastAPI application & REST endpoints
+│   ├── database.py         # SQLAlchemy models & database setup
+│   └── storage.py          # Cloud storage integration (R2)
 ├── config/
 │   ├── directories.py       # Asset folder paths
 │   ├── prompts.py          # AI prompt templates
@@ -274,8 +306,61 @@ reelcraft/
         ├── audio/          # Generated voice-overs
         ├── videos/         # Downloaded video assets
         ├── images/         # Downloaded image assets
-        └── outputs/        # Final generated videos
+        └── outputs/        # Final generated videos (if stored locally)
 ```
+
+---
+
+## Storage & Database
+
+### Database
+
+ReelCraft uses SQLite with SQLAlchemy for storing video metadata and job information:
+
+- **Videos Table**: Stores video metadata (title, source URL, file path, storage location, duration, size)
+- **Jobs Table**: Tracks background video generation jobs with status and progress
+- **Automatic Setup**: Database is created automatically on first run at `reelcraft.db`
+
+### Cloud Storage (Optional)
+
+ReelCraft supports Cloudflare R2 (S3-compatible) for scalable video storage:
+
+**Benefits:**
+- Unlimited storage without local disk constraints
+- Global CDN delivery for fast video access
+- Automatic upload after video generation
+- Cost-effective storage (R2 has no egress fees)
+
+**Setup:**
+
+1. **Install boto3** (if not already installed):
+   ```bash
+   uv add boto3
+   # or: pip install boto3
+   ```
+
+2. **Create R2 bucket** at [Cloudflare Dashboard](https://dash.cloudflare.com/):
+   - Navigate to R2 → Create bucket
+   - Note your bucket name and account ID
+
+3. **Configure environment variables** in `.env`:
+   ```bash
+   R2_ENABLED=true
+   R2_ENDPOINT_URL=https://your-account-id.r2.cloudflarestorage.com
+   R2_ACCESS_KEY_ID=your_access_key
+   R2_SECRET_ACCESS_KEY=your_secret_key
+   R2_BUCKET_NAME=reelcraft-videos
+   R2_PUBLIC_URL=https://videos.yourdomain.com  # Optional: custom domain
+   ```
+
+4. **Behavior:**
+   - When enabled, videos are automatically uploaded to R2 after generation
+   - Local copies can be deleted to save disk space
+   - Videos are served from cloud URL instead of local file
+
+**Storage Locations:**
+- `local`: Video stored only on server disk
+- `cloud`: Video stored in Cloudflare R2 (can delete local copy)
 
 ---
 
@@ -439,6 +524,9 @@ Core dependencies:
 - `requests` - Pexels API
 - `fastapi` - Web framework and API
 - `uvicorn` - ASGI server
+- `sqlalchemy` - Database ORM
+- `aiosqlite` - Async SQLite driver
+- `boto3` - AWS S3/R2 client (optional, for cloud storage)
 - `langfuse` - Monitoring (optional)
 - `python-dotenv` - Environment configuration
 
