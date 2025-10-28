@@ -46,51 +46,62 @@ The output must follow this exact JSON structure. Do not deviate.
       "scene_number": 1,
       "script": "This is the hook. A strong, attention-grabbing opening sentence.",
       "asset_keywords": ["keyword1", "keyword2", "keyword3"],
-      "asset_type": "image/video"
+      "asset_type": "image/video",
+      "scene_type": "media"
     },
     {
       "scene_number": 2,
       "script": "This is the main point 1, simplified and delivered quickly.",
       "asset_keywords": ["keyword1", "keyword2", "keyword3"],
-      "asset_type": "image/video"
+      "asset_type": "image/video",
+      "scene_type": "media"
 
     },
     {
       "scene_number": 3,
-      "script": "This is the main point 2 or a supporting detail.",
-      "asset_keywords": ["keyword1", "keyword2", "keyword3"],
-      "asset_type": "image/video"
+      "script": "KEY POINT",
+      "scene_type": "text"
 
     },
     {
       "scene_number": 4,
-      "script": "A follow-up detail for point 2.",
+      "script": "This is the main point 2 or a supporting detail.",
       "asset_keywords": ["keyword1", "keyword2", "keyword3"],
-      "asset_type": "image/video"
+      "asset_type": "image/video",
+      "scene_type": "media"
 
     },
     {
       "scene_number": 5,
-      "script": "This is main point 3.",
+      "script": "A follow-up detail for point 2.",
       "asset_keywords": ["keyword1", "keyword2", "keyword3"],
-      "asset_type": "image/video"
+      "asset_type": "image/video",
+      "scene_type": "media"
 
     },
     {
       "scene_number": 6,
-      "script": "An example or elaboration of point 3.",
+      "script": "This is main point 3.",
       "asset_keywords": ["keyword1", "keyword2", "keyword3"],
-      "asset_type": "image/video"
+      "asset_type": "image/video",
+      "scene_type": "media"
+
     },
     {
       "scene_number": 7,
       "script": "A concluding thought or a simple call-to-action (CTA).",
       "asset_keywords": ["keyword1", "keyword2", "call to action icon"],
-      "asset_type": "image/video"
+      "asset_type": "image/video",
+      "scene_type": "media"
     }
   ]
 }
 ```
+
+**Scene Types:**
+
+* **"media"**: Regular scene with voiceover + visual asset (image/video from Pexels). This is the default.
+* **"text"**: Text-only scene showing a short, punchy title or key point (1-5 words max) on a solid background with animation. Use sparingly (1-2 times per video) to emphasize critical points or create visual breaks. For text scenes, omit `asset_keywords` and `asset_type` fields. The `script` field should contain ONLY the text to display (not a voiceover script).
 
 **Examples:**
 Here are three examples of good output. Use these to understand the desired tone and structure.
