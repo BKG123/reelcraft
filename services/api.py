@@ -439,6 +439,65 @@ async def get_video_by_id(video_id: int):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.delete("/api/videos/{video_id}")
+async def delete_video(video_id: int):
+    """
+    Delete a video from the database and storage (local or cloud).
+
+    - **video_id**: The video ID to delete
+    """
+    try:
+        async with async_session() as session:
+            # Get the video
+            result = await session.execute(select(Video).where(Video.id == video_id))
+            video = result.scalar_one_or_none()
+
+            if not video:
+                raise HTTPException(status_code=404, detail="Video not found")
+
+            # Store info for logging
+            video_title = video.title
+            storage_location = video.storage_location
+            file_path = video.file_path
+
+            # Delete from storage based on location
+            storage_deleted = False
+            if storage_location == StorageLocation.CLOUD:
+                # Extract object key from cloud URL
+                if file_path and file_path.startswith(("http://", "https://")):
+                    # Parse object key from URL (e.g., "videos/5/filename.mp4")
+                    # Format: https://domain/videos/5/filename.mp4
+                    parts = file_path.split("/")
+                    if len(parts) >= 3:
+                        object_key = "/".join(parts[-3:])  # videos/5/filename.mp4
+                        storage_deleted = await storage_manager.delete_video(object_key)
+                    else:
+                        logger.warning(f"Could not parse object key from URL: {file_path}")
+            else:  # LOCAL
+                if file_path:
+                    storage_deleted = await storage_manager.delete_local_video(file_path)
+
+            # Delete from database
+            await session.delete(video)
+            await session.commit()
+
+            logger.info(f"Deleted video ID {video_id}: {video_title}")
+
+            return {
+                "status": "success",
+                "message": f"Video '{video_title}' deleted successfully",
+                "video_id": video_id,
+                "storage_location": storage_location.value,
+                "file_deleted": storage_deleted,
+            }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting video: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/videos/{video_name}")
 async def get_video(video_name: str):
     """

@@ -136,6 +136,35 @@ class StorageManager:
             logger.error(f"Error deleting from R2: {e}")
             return False
 
+    async def delete_local_video(self, file_path: str) -> bool:
+        """
+        Delete video from local storage.
+
+        Args:
+            file_path: Local file path (relative or absolute)
+
+        Returns:
+            True if deleted successfully
+        """
+        try:
+            local_path = Path(file_path)
+
+            # Convert to absolute path if relative
+            if not local_path.is_absolute():
+                local_path = Path.cwd() / local_path
+
+            if not local_path.exists():
+                logger.warning(f"Video file not found: {local_path}")
+                return False
+
+            # Delete the file
+            local_path.unlink()
+            logger.info(f"Deleted local video: {local_path}")
+            return True
+        except Exception as e:
+            logger.error(f"Error deleting local video: {e}")
+            return False
+
     def get_video_url(self, video_id: int, filename: str) -> str:
         """
         Get public URL for a video.
