@@ -19,6 +19,12 @@ ReelCraft is an automated video generation pipeline that converts web articles i
 - **Job Management**: Background job tracking with status updates and cancellation
 - **Langfuse Integration**: Track and monitor AI model calls and performance
 
+### ✨ New Visual Polish Features
+- **Dynamic Audio Ducking**: Background music automatically lowers during voiceover and rises during pauses (professional sidechain compression)
+- **Text-Only Scenes**: AI generates punchy text overlays (1-5 words) on solid backgrounds to emphasize key points
+- **Smart Aspect Ratios**: Landscape videos (16:9) display with blurred background fill for portrait frames (9:16)
+- **Smooth Transitions**: Dynamic scene transitions (fade, wipe, slide) instead of hard cuts for polished flow
+
 ### Web Interface Features
 - **🌐 Modern Web UI**: User-friendly interface for generating videos without code
 - **⚡ Real-time Progress**: WebSocket-powered live updates during video generation
