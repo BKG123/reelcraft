@@ -119,9 +119,19 @@ async def generate_assets(script: dict, progress_callback: Optional[Callable] = 
     # Generate all assets in parallel
     asset_tasks = []
     for scene in scenes:
-        asset_type = scene["asset_type"]
-        asset_keywords = scene["asset_keywords"]
+        scene_type = scene.get("scene_type", "media")  # Default to media if not specified
         scene_number = scene["scene_number"]
+
+        # Handle text-only scenes
+        if scene_type == "text":
+            # Text scenes don't need asset downloads
+            scene["asset_file_path"] = None
+            scene["asset_type"] = "text"
+            continue
+
+        # Regular media scenes
+        asset_type = scene.get("asset_type", "video")
+        asset_keywords = scene.get("asset_keywords", [])
         script_text = scene.get("script", "")
 
         # Pick the first keyword for simplicity
@@ -136,22 +146,26 @@ async def generate_assets(script: dict, progress_callback: Optional[Callable] = 
 
         # Create async task for downloading asset with AI filtering
         asset_tasks.append(
-            search_and_download_asset(
+            (scene_number, search_and_download_asset(
                 keyword=keyword,
                 asset_type=actual_asset_type,
                 file_name=file_name,
                 script_text=script_text,  # Pass script for AI filtering
                 use_ai_filtering=True,    # Enable AI filtering
                 orientation="portrait",
-            )
+            ))
         )
 
     # Execute all downloads in parallel
-    asset_file_paths = await asyncio.gather(*asset_tasks)
+    if asset_tasks:
+        results = await asyncio.gather(*[task for _, task in asset_tasks])
 
-    # Assign the generated asset file paths back to scenes
-    for scene, asset_file_path in zip(scenes, asset_file_paths):
-        scene["asset_file_path"] = asset_file_path
+        # Assign the generated asset file paths back to scenes
+        for (scene_number, _), asset_file_path in zip(asset_tasks, results):
+            for scene in scenes:
+                if scene["scene_number"] == scene_number:
+                    scene["asset_file_path"] = asset_file_path
+                    break
 
     return script
 
