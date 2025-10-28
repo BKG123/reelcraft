@@ -280,6 +280,38 @@ function downloadVideo(videoId) {
     document.body.removeChild(link);
 }
 
+// Delete video
+async function deleteVideo(videoId, videoTitle) {
+    // Show confirmation dialog
+    const confirmDelete = confirm(`Are you sure you want to delete "${videoTitle}"?\n\nThis will remove the video from storage and cannot be undone.`);
+
+    if (!confirmDelete) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/videos/${videoId}`, {
+            method: 'DELETE',
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.detail || 'Failed to delete video');
+        }
+
+        // Show success message
+        alert(`Video deleted successfully!\n\nFile: ${data.file_deleted ? 'Deleted' : 'Not found/already deleted'}\nStorage: ${data.storage_location}`);
+
+        // Reload videos list
+        await loadVideos();
+
+    } catch (error) {
+        console.error('Error deleting video:', error);
+        alert(`Error: ${error.message || 'Failed to delete video'}`);
+    }
+}
+
 // Format file size
 function formatFileSize(mb) {
     return `${mb} MB`;
@@ -315,10 +347,14 @@ async function loadVideos() {
                     <div class="video-card-meta">
                         <div>${formatDate(video.created_at)}</div>
                         <div>${video.size_mb ? formatFileSize(video.size_mb) : 'N/A'}</div>
+                        ${video.storage_location ? `<span class="storage-badge storage-${video.storage_location}">${video.storage_location}</span>` : ''}
                     </div>
                     <div class="video-card-actions">
                         <button class="btn btn-secondary" onclick="downloadVideo(${video.id})">
                             Download
+                        </button>
+                        <button class="btn btn-danger" onclick="deleteVideo(${video.id}, '${video.title.replace(/'/g, "\\'")}')">
+                            Delete
                         </button>
                     </div>
                 </div>
