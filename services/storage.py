@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 from typing import Optional
 import logging
+from urllib.parse import quote
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -97,12 +98,15 @@ class StorageManager:
                     },
                 )
 
-            # Generate public URL
+            # Generate public URL with proper encoding
+            # URL encode the object key to handle special characters like !, ', etc.
+            encoded_key = quote(object_key, safe='/')
+
             if R2_PUBLIC_URL:
-                public_url = f"{R2_PUBLIC_URL}/{object_key}"
+                public_url = f"{R2_PUBLIC_URL}/{encoded_key}"
             else:
                 # Use default R2.dev URL
-                public_url = f"{R2_ENDPOINT_URL.replace('https://', 'https://pub-')}/{R2_BUCKET_NAME}/{object_key}"
+                public_url = f"{R2_ENDPOINT_URL.replace('https://', 'https://pub-')}/{R2_BUCKET_NAME}/{encoded_key}"
 
             logger.info(f"Video uploaded successfully: {public_url}")
             return public_url

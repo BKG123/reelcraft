@@ -3,7 +3,7 @@ from typing import Optional
 import json
 import uuid
 from datetime import datetime
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Depends
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, RedirectResponse
@@ -11,7 +11,7 @@ from pydantic import BaseModel, HttpUrl
 from sqlalchemy import select
 from services.pipeline import pipeline
 from config.directories import OUTPUT_FOLDER
-from services.database import init_db, get_session, async_session, Job, Video, JobStatus
+from services.database import init_db, async_session, Job, Video, JobStatus, StorageLocation
 from services.job_manager import job_manager, JobProgress
 from services.cleanup import cleanup_generation_assets
 from services.storage import storage_manager
@@ -33,6 +33,7 @@ async def startup_event():
     """Initialize database on startup."""
     await init_db()
     logger.info("Database initialized")
+
 
 # Configure CORS
 app.add_middleware(
@@ -134,42 +135,72 @@ async def video_generation_job(job_id: str, progress_callback, url: str):
 
     size_mb = video_path.stat().st_size / (1024 * 1024) if video_path.exists() else None
 
-    # Save relative path to database (relative to project root)
-    try:
-        relative_path = video_path.relative_to(Path.cwd())
-        file_path_str = str(relative_path)
-    except ValueError:
-        # If relative_to fails, store absolute path
-        file_path_str = str(video_path)
-        logger.warning(f"Could not make path relative, storing absolute: {file_path_str}")
-
-    # Save video to database
+    # Create video entry and optionally upload to cloud
+    video = None
     async with async_session() as session:
-        video = Video(
-            title=result["title"],
-            source_url=url,
-            file_path=file_path_str,
-            size_mb=round(size_mb, 2) if size_mb else None,
-            script_json=json.dumps(result["script"])
-        )
-        session.add(video)
-        await session.commit()
-        await session.refresh(video)
+        # Determine file path based on cloud storage availability
+        if storage_manager.is_enabled():
+            await broadcast_progress("Uploading video to cloud storage...")
+            try:
+                # Create video entry with placeholder
+                video = Video(
+                    title=result["title"],
+                    source_url=url,
+                    file_path="uploading...",
+                    size_mb=round(size_mb, 2) if size_mb else None,
+                    script_json=json.dumps(result["script"]),
+                )
+                session.add(video)
+                await session.commit()
+                await session.refresh(video)
 
-        # Upload to cloud storage if enabled
-        try:
-            if storage_manager.is_enabled():
-                await broadcast_progress("Uploading video to cloud storage...")
+                # Upload to cloud
                 cloud_url = await storage_manager.upload_video(str(video_path), video.id)
+
                 if cloud_url:
                     logger.info(f"Video uploaded to cloud: {cloud_url}")
-                    # Update file_path to cloud URL
                     video.file_path = cloud_url
-                    await session.commit()
-                    await session.refresh(video)
-        except Exception as e:
-            logger.error(f"Error uploading to cloud storage: {e}")
-            # Continue with local storage if cloud upload fails
+                    video.storage_location = StorageLocation.CLOUD
+                    await broadcast_progress("Video uploaded to cloud storage")
+                else:
+                    # Cloud upload failed, use local path
+                    logger.warning("Cloud upload failed, falling back to local path")
+                    try:
+                        relative_path = video_path.relative_to(Path.cwd())
+                        video.file_path = str(relative_path)
+                    except ValueError:
+                        video.file_path = str(video_path)
+                    video.storage_location = StorageLocation.LOCAL
+
+                await session.commit()
+                await session.refresh(video)
+
+            except Exception as e:
+                logger.error(f"Error during cloud upload: {e}")
+                # If video wasn't created, we'll create it below with local path
+                if not video:
+                    raise
+
+        # If cloud storage not enabled, create video with local path
+        if not video:
+            try:
+                relative_path = video_path.relative_to(Path.cwd())
+                file_path_str = str(relative_path)
+            except ValueError:
+                file_path_str = str(video_path)
+                logger.warning(f"Could not make path relative, storing absolute: {file_path_str}")
+
+            video = Video(
+                title=result["title"],
+                source_url=url,
+                file_path=file_path_str,
+                storage_location=StorageLocation.LOCAL,
+                size_mb=round(size_mb, 2) if size_mb else None,
+                script_json=json.dumps(result["script"]),
+            )
+            session.add(video)
+            await session.commit()
+            await session.refresh(video)
 
         # Update job with video_id
         result_db = await session.execute(select(Job).where(Job.id == job_id))
@@ -212,12 +243,16 @@ async def generate_video(request: VideoGenerationRequest):
         # Check if we already have a video for this URL
         async with async_session() as session:
             result = await session.execute(
-                select(Video).where(Video.source_url == url).order_by(Video.created_at.desc())
+                select(Video)
+                .where(Video.source_url == url)
+                .order_by(Video.created_at.desc())
             )
             existing_video = result.scalar_one_or_none()
 
             if existing_video:
-                logger.info(f"Found existing video (ID: {existing_video.id}) for URL: {url}")
+                logger.info(
+                    f"Found existing video (ID: {existing_video.id}) for URL: {url}"
+                )
 
                 # Create a "fake" completed job entry for consistency
                 job = Job(
@@ -227,7 +262,7 @@ async def generate_video(request: VideoGenerationRequest):
                     progress_message=f"Video already exists (reused from cache)",
                     video_id=existing_video.id,
                     started_at=datetime.utcnow(),
-                    completed_at=datetime.utcnow()
+                    completed_at=datetime.utcnow(),
                 )
                 session.add(job)
                 await session.commit()
@@ -235,20 +270,17 @@ async def generate_video(request: VideoGenerationRequest):
                 return {
                     "job_id": job.id,
                     "status": "completed",
-                    "message": f"Video already exists for this URL. Reusing existing video (ID: {existing_video.id})"
+                    "message": f"Video already exists for this URL. Reusing existing video (ID: {existing_video.id})",
                 }
 
         # URL not found, create new background job
         logger.info(f"Creating new video generation job for URL: {url}")
-        job_id = await job_manager.create_job(
-            video_generation_job,
-            url=url
-        )
+        job_id = await job_manager.create_job(video_generation_job, url=url)
 
         return {
             "job_id": job_id,
             "status": "pending",
-            "message": f"Video generation job created. Use job_id to track progress."
+            "message": f"Video generation job created. Use job_id to track progress.",
         }
 
     except Exception as e:
@@ -282,19 +314,14 @@ async def cancel_job(job_id: str):
 
     if not cancelled:
         raise HTTPException(
-            status_code=404,
-            detail="Job not found or already completed"
+            status_code=404, detail="Job not found or already completed"
         )
 
     return {"status": "cancelled", "message": f"Job {job_id} cancelled"}
 
 
 @app.get("/api/jobs")
-async def list_jobs(
-    status: Optional[str] = None,
-    limit: int = 50,
-    offset: int = 0
-):
+async def list_jobs(status: Optional[str] = None, limit: int = 50, offset: int = 0):
     """
     List all jobs with optional filtering.
 
@@ -310,13 +337,11 @@ async def list_jobs(
             except ValueError:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Invalid status. Must be one of: {[s.value for s in JobStatus]}"
+                    detail=f"Invalid status. Must be one of: {[s.value for s in JobStatus]}",
                 )
 
         jobs = await job_manager.list_jobs(
-            status=job_status_enum,
-            limit=limit,
-            offset=offset
+            status=job_status_enum, limit=limit, offset=offset
         )
 
         return {"jobs": jobs, "count": len(jobs)}
@@ -329,24 +354,44 @@ async def list_jobs(
 
 
 @app.get("/api/videos", response_model=dict)
-async def list_videos(limit: int = 50, offset: int = 0):
+async def list_videos(
+    limit: int = 50,
+    offset: int = 0,
+    storage_location: Optional[str] = None
+):
     """
     List all generated videos from database.
 
     - **limit**: Maximum number of videos to return (default: 50)
     - **offset**: Offset for pagination (default: 0)
+    - **storage_location**: Filter by storage location ("local" or "cloud")
     """
     try:
         async with async_session() as session:
-            query = select(Video).order_by(Video.created_at.desc()).limit(limit).offset(offset)
+            query = select(Video).order_by(Video.created_at.desc())
+
+            # Filter by storage location if specified
+            if storage_location:
+                try:
+                    location_enum = StorageLocation(storage_location.lower())
+                    query = query.where(Video.storage_location == location_enum)
+                except ValueError:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Invalid storage_location. Must be 'local' or 'cloud'"
+                    )
+
+            query = query.limit(limit).offset(offset)
             result = await session.execute(query)
             videos = result.scalars().all()
 
             return {
                 "videos": [video.to_dict() for video in videos],
-                "count": len(videos)
+                "count": len(videos),
             }
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error listing videos: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -369,7 +414,7 @@ async def get_video_by_id(video_id: int):
                 raise HTTPException(status_code=404, detail="Video not found")
 
             # Check if file_path is a cloud URL (starts with http:// or https://)
-            if video.file_path.startswith(('http://', 'https://')):
+            if video.file_path.startswith(("http://", "https://")):
                 # Redirect to cloud storage URL
                 return RedirectResponse(url=video.file_path)
 
@@ -379,12 +424,12 @@ async def get_video_by_id(video_id: int):
                 video_path = Path.cwd() / video_path
 
             if not video_path.exists():
-                raise HTTPException(status_code=404, detail="Video file not found on disk")
+                raise HTTPException(
+                    status_code=404, detail="Video file not found on disk"
+                )
 
             return FileResponse(
-                video_path,
-                media_type="video/mp4",
-                filename=video_path.name
+                video_path, media_type="video/mp4", filename=video_path.name
             )
 
     except HTTPException:
@@ -457,12 +502,14 @@ async def websocket_endpoint(websocket: WebSocket):
                 # Create callback for this job
                 async def send_job_progress(progress: JobProgress):
                     try:
-                        await websocket.send_json({
-                            "type": "job_progress",
-                            "job_id": job_id,
-                            "progress": progress.progress,
-                            "message": progress.message
-                        })
+                        await websocket.send_json(
+                            {
+                                "type": "job_progress",
+                                "job_id": job_id,
+                                "progress": progress.progress,
+                                "message": progress.message,
+                            }
+                        )
                     except Exception as e:
                         logger.error(f"Error sending job progress: {e}")
 
@@ -472,20 +519,20 @@ async def websocket_endpoint(websocket: WebSocket):
                 # Register callback with job manager
                 await job_manager.register_progress_callback(job_id, job_callback)
 
-                await websocket.send_json({
-                    "type": "subscribed",
-                    "job_id": job_id,
-                    "message": f"Subscribed to job {job_id}"
-                })
+                await websocket.send_json(
+                    {
+                        "type": "subscribed",
+                        "job_id": job_id,
+                        "message": f"Subscribed to job {job_id}",
+                    }
+                )
 
                 # Send current job status
                 job_status = await job_manager.get_job_status(job_id)
                 if job_status:
-                    await websocket.send_json({
-                        "type": "job_status",
-                        "job_id": job_id,
-                        "status": job_status
-                    })
+                    await websocket.send_json(
+                        {"type": "job_status", "job_id": job_id, "status": job_status}
+                    )
 
     except WebSocketDisconnect:
         logger.info("WebSocket client disconnected")

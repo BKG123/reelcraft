@@ -35,6 +35,12 @@ class JobStatus(enum.Enum):
     CANCELLED = "cancelled"
 
 
+class StorageLocation(enum.Enum):
+    """Storage location enum."""
+    LOCAL = "local"
+    CLOUD = "cloud"
+
+
 class Job(Base):
     """Background job model."""
     __tablename__ = "jobs"
@@ -75,7 +81,8 @@ class Video(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     title = Column(String, nullable=False)
     source_url = Column(Text, nullable=False)
-    file_path = Column(String, nullable=True)  # Relative path from project root
+    file_path = Column(String, nullable=True)  # Relative path from project root or cloud URL
+    storage_location = Column(SQLEnum(StorageLocation), nullable=False, default=StorageLocation.LOCAL, index=True)
 
     duration = Column(Float, nullable=True)  # Duration in seconds
     size_mb = Column(Float, nullable=True)  # File size in MB
@@ -94,6 +101,7 @@ class Video(Base):
             "title": self.title,
             "source_url": self.source_url,
             "file_path": self.file_path,
+            "storage_location": self.storage_location.value if self.storage_location else None,
             "duration": self.duration,
             "size_mb": self.size_mb,
             "created_at": self.created_at.isoformat() if self.created_at else None,
