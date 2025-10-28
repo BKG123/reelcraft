@@ -2,12 +2,19 @@ import json
 import os
 import asyncio
 from typing import Callable, Optional
+from pathlib import Path
 from pydub import AudioSegment
 from utils.assets import search_and_download_asset
 from utils.ai import generate_audio_file, gemini_llm_call
 from utils.fire_crawl import get_webpage_markdown
 from utils.video_editing import script_to_asset_details, video_editing_pipeline
 from config.prompts import SCRIPT_GENERATOR_SYSTEM
+from services.storage import storage_manager
+from services.database import async_session, Video
+from sqlalchemy import select
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 async def pipeline(url: str, progress_callback: Optional[Callable] = None):
@@ -82,13 +89,60 @@ ARTICLE CONTENT:
     await update_progress(85, "Editing video with FFmpeg...")
     await video_editing_pipeline(asset_details)
 
-    await update_progress(95, "Finalizing video...")
+    await update_progress(90, "Video editing completed")
 
     output_video = asset_details['output_video']
+    output_video_path = Path(output_video)
+
+    # Step 6: Upload to cloud storage (if enabled)
+    cloud_url = None
+    if storage_manager.is_enabled():
+        await update_progress(92, "Uploading video to cloud storage...")
+
+        # Create video entry in database
+        async with async_session() as session:
+            # Check if video already exists
+            result = await session.execute(
+                select(Video).where(Video.title == reel_title)
+            )
+            video = result.scalar_one_or_none()
+
+            if not video:
+                # Create new video entry
+                size_mb = output_video_path.stat().st_size / (1024 * 1024)
+                video = Video(
+                    title=reel_title,
+                    source_url=url,
+                    file_path=str(output_video),
+                    size_mb=size_mb,
+                    script_json=json.dumps(script)
+                )
+                session.add(video)
+                await session.commit()
+                await session.refresh(video)
+                logger.info(f"Created database entry for video: {reel_title} (ID: {video.id})")
+
+            # Upload to cloud storage
+            cloud_url = await storage_manager.upload_video(str(output_video), video.id)
+
+            if cloud_url:
+                # Update database with cloud URL
+                video.file_path = cloud_url
+                await session.commit()
+                logger.info(f"Video uploaded to cloud: {cloud_url}")
+                await update_progress(97, "Video uploaded to cloud storage")
+            else:
+                logger.info("Cloud storage upload skipped or failed, using local path")
+                await update_progress(97, "Using local video storage")
+    else:
+        logger.info("Cloud storage not enabled, keeping video locally")
+        await update_progress(97, "Video saved locally")
+
     await update_progress(100, f"Video created successfully: {output_video}")
 
     return {
         "output_video": output_video,
+        "cloud_url": cloud_url,
         "script": script,
         "title": reel_title
     }
