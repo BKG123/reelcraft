@@ -230,15 +230,13 @@ async def search_and_download_asset(
 
         # Use AI filtering if enabled and script context provided
         if use_ai_filtering and script_text and len(videos) > 1:
-            # For videos, we use the search query + position as a proxy for relevance
-            # Since Pexels video API doesn't provide descriptive text, we rely on
-            # the assumption that Pexels returns most relevant results first
-            # But we still let AI choose between top 5 based on user attribution
+            # For videos, build descriptions based on available metadata
+            # Pexels video API provides limited text, so we construct meaningful descriptions
             asset_options = [
                 {
                     "id": video["id"],
-                    "alt": f"Video by {video.get('user', {}).get('name', 'Unknown')}",
-                    "description": f"Video {i+1} from search results for '{keyword}' - ID: {video['id']}",
+                    "alt": f"{keyword} - {video.get('width', 0)}x{video.get('height', 0)}, {video.get('duration', 0)}s duration, by {video.get('user', {}).get('name', 'Unknown')}",
+                    "description": f"Video showing: {keyword}. Dimensions: {video.get('width', 0)}x{video.get('height', 0)}, Duration: {video.get('duration', 0)}s",
                     "url": video.get("url", "")
                 }
                 for i, video in enumerate(videos)
