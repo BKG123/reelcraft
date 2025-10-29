@@ -5,7 +5,7 @@ from typing import Callable, Optional
 from pydub import AudioSegment
 from utils.assets import search_and_download_asset
 from utils.ai import generate_audio_file, gemini_llm_call
-from utils.fire_crawl import get_webpage_markdown
+from utils.fire_crawl import get_webpage_markdown, WebScrapingError
 from utils.video_editing import script_to_asset_details, video_editing_pipeline
 from config.prompts import SCRIPT_GENERATOR_SYSTEM
 
@@ -28,7 +28,17 @@ async def pipeline(url: str, progress_callback: Optional[Callable] = None):
 
     # Step 1: Get content from article
     await update_progress(5, "Extracting article content...")
-    article_content = get_webpage_markdown(url)
+    try:
+        article_content = await get_webpage_markdown(url)
+    except WebScrapingError as e:
+        error_msg = f"Failed to extract content from URL: {str(e)}"
+        await update_progress(0, error_msg)
+        raise WebScrapingError(error_msg) from e
+    except Exception as e:
+        error_msg = f"Unexpected error while extracting content: {str(e)}"
+        await update_progress(0, error_msg)
+        raise WebScrapingError(error_msg) from e
+
     await update_progress(10, "Article content extracted")
 
     # Step 2: Generate script
