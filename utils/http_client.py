@@ -8,6 +8,34 @@ across the application with consistent error handling and configuration.
 import httpx
 from typing import Optional, Dict, Any
 from pathlib import Path
+import asyncio
+from functools import wraps
+
+
+def async_retry(max_attempts=3, backoff_base=2, exceptions=(httpx.ConnectTimeout, httpx.ReadTimeout, httpx.ConnectError)):
+    """
+    Decorator for retrying async functions with exponential backoff.
+
+    Args:
+        max_attempts: Maximum number of retry attempts
+        backoff_base: Base for exponential backoff (seconds)
+        exceptions: Tuple of exception types to catch and retry
+    """
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(*args, **kwargs):
+            for attempt in range(max_attempts):
+                try:
+                    return await func(*args, **kwargs)
+                except exceptions as e:
+                    if attempt == max_attempts - 1:
+                        raise
+                    wait_time = backoff_base ** attempt
+                    print(f"Request failed with {type(e).__name__}, retrying in {wait_time}s (attempt {attempt + 1}/{max_attempts})...")
+                    await asyncio.sleep(wait_time)
+            return None
+        return wrapper
+    return decorator
 
 
 class HTTPClient:
@@ -17,7 +45,7 @@ class HTTPClient:
         self,
         base_url: Optional[str] = None,
         headers: Optional[Dict[str, str]] = None,
-        timeout: float = 30.0,
+        timeout: float = 90.0,
     ):
         """
         Initialize HTTP client.
@@ -25,12 +53,13 @@ class HTTPClient:
         Args:
             base_url: Base URL for all requests
             headers: Default headers to include in all requests
-            timeout: Request timeout in seconds (default: 30.0)
+            timeout: Request timeout in seconds (default: 90.0)
         """
         self.base_url = base_url
         self.default_headers = headers or {}
         self.timeout = timeout
 
+    @async_retry(max_attempts=3)
     async def get(
         self,
         url: str,
@@ -200,7 +229,7 @@ class PexelsClient(HTTPClient):
         Args:
             api_key: Pexels API key
         """
-        super().__init__(headers={"Authorization": api_key}, timeout=30.0)
+        super().__init__(headers={"Authorization": api_key}, timeout=120.0)
         self.api_key = api_key
 
     async def search_photos(
