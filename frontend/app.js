@@ -41,7 +41,8 @@ function connectWebSocket() {
         if (data.type === 'connection') {
             console.log(data.message);
         } else if (data.type === 'progress') {
-            updateProgress(data.message, 50);
+            // Generic progress message without specific percentage
+            updateProgress(data.message, null);
         } else if (data.type === 'job_progress') {
             updateProgress(data.message, data.progress);
         } else if (data.type === 'subscribed') {
@@ -106,12 +107,16 @@ async function handleJobStatus(status) {
         let errorMsg = status.error_message || 'Video generation failed';
 
         // Check for common errors and provide helpful messages
-        if (errorMsg.includes('Server disconnected') || errorMsg.includes('ServerDisconnectedError')) {
+        if (errorMsg.includes('Failed to extract content') || errorMsg.includes('Failed to scrape')) {
+            errorMsg = 'Unable to access the article content. The website may be blocking automated access, the page may require login, or the URL may be invalid. Please try a different article.';
+        } else if (errorMsg.includes('Server disconnected') || errorMsg.includes('ServerDisconnectedError')) {
             errorMsg = 'Connection to AI service was interrupted. This might be due to high load. Please try again.';
         } else if (errorMsg.includes('rate limit') || errorMsg.includes('quota')) {
             errorMsg = 'API rate limit reached. Please wait a moment and try again.';
-        } else if (errorMsg.includes('timeout')) {
+        } else if (errorMsg.includes('timeout') || errorMsg.includes('ConnectTimeout')) {
             errorMsg = 'Request timed out. Please check your internet connection and try again.';
+        } else if (errorMsg.includes('Content too short') || errorMsg.includes('empty')) {
+            errorMsg = 'The article content appears to be empty or too short. Please try a different URL with substantial content.';
         }
 
         showError(errorMsg);
